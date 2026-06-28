@@ -9,19 +9,9 @@ decode = nil
 md5 = nil
 currentFilename = ''
 
--- Path configuration: single source of truth for all platform paths
-local positionFolders = {
-    Linux = os.getenv("HOME") .. '/.config/mpv/mpv-positions/',
-    OSX   = os.getenv("HOME") .. '/.config/mpv/mpv-positions/',
-    Windows = os.getenv("USERPROFILE") .. '\\scoop\\apps\\mpv\\current\\portable_config\\mpv-positions\\',
-    Android = '/storage/emulated/0/Android/media/is.xyz.mpv/mpv-positions/',
-}
-local scriptFolders = {
-    Linux = os.getenv("HOME") .. '/.config/mpv/scripts/mpv-progress-sync/lib/',
-    OSX   = os.getenv("HOME") .. '/.config/mpv/scripts/mpv-progress-sync/lib/',
-    Windows = os.getenv("USERPROFILE") .. '\\scoop\\apps\\mpv\\current\\portable_config\\scripts\\mpv-progress-sync\\lib\\',
-    Android = '/storage/emulated/0/Android/media/is.xyz.mpv/mpv-progress-sync/lib/',
-}
+-- Position folder is relative to the script directory (deployed alongside the script)
+local scriptDir = mp.get_script_directory()
+local positionFolder = scriptDir .. '/positions/'
 
 -- Load decoder, encoder, and md5 once at startup
 function loadFile(path)
@@ -29,13 +19,10 @@ function loadFile(path)
 end
 
 local function initLibs()
-    local myos = getOS()
-    local scriptFolder = scriptFolders[myos]
-    if scriptFolder then
-        decode = loadFile(scriptFolder .. 'decoder.lua')()
-        encode = loadFile(scriptFolder .. 'encoder.lua')()
-        md5 = loadFile(scriptFolder .. 'md5.lua')
-    end
+    local libFolder = scriptDir .. '/lib/'
+    decode = loadFile(libFolder .. 'decoder.lua')()
+    encode = loadFile(libFolder .. 'encoder.lua')()
+    md5 = loadFile(libFolder .. 'md5.lua')
 end
 
 initLibs()
@@ -43,18 +30,14 @@ initLibs()
 
 -- This function is called when mpv loads a file
 mp.register_event("file-loaded", function()
-    -- Call function to get users operating system
-    local myos = getOS()
     -- Call function to get current file
-    currentFilename = getFilename(myos)
+    currentFilename = getFilename()
     -- Strip filename of any escape characters
     currentFilename = string.gsub(currentFilename, "[^%w%.%-_]", "_")
     -- Get files duration from mpv
     duration = mp.get_property_number("duration")
-    -- Set global 'folder' where the position file is saved
-    folder = positionFolders[myos] or ''
     -- Set the filepath of the json file to be the combination of the folder and filename with .json extension
-    filepath = folder .. currentFilename .. ".json"
+    filepath = positionFolder .. currentFilename .. ".json"
     -- Attempt to open the 'positionFile' using the filepath
     local positionFile, err = io.open(filepath, "r")
     -- If the positionFile json is not present
@@ -104,13 +87,9 @@ mp.register_event("shutdown", function()
         local filename = string.gsub(currentFilename, "[^%w%.%-_]", "_")
 
         -- Create the folder to save the positions of open files
-        if getOS() == "Windows" then
-            os.execute('mkdir "' .. folder .. '"')
-        else
-            os.execute('mkdir -p "' .. folder .. '"')
-        end
+        os.execute('mkdir -p "' .. positionFolder .. '"')
         -- Create the filepath to save the position
-        filepath = folder .. filename .. ".json"
+        filepath = positionFolder .. filename .. ".json"
         -- Open the file
 
         print("Saving filepath: ", filepath)
@@ -139,9 +118,8 @@ mp.register_event("shutdown", function()
 end)
 
 
--- Help function to get the filename of a file. Parameter is the operating system of the user
-function getFilename(myos)
-
+-- Help function to get the filename of a file
+function getFilename()
     -- Check 'force-media-title' to determine if it is a youtube video
     local title = mp.get_property("force-media-title")
     -- If it is a YT video then use the YT video's title
@@ -161,35 +139,4 @@ function getFilename(myos)
     print("Hashed file size and duration file descriptor: ", fd)
     -- Return the hashed file size and duration descriptor
     return fd
-end
-
-
--- Normalize OS string to canonical values: "Linux", "OSX", "Windows", "Android"
-local function normalizeOS(raw)
-    raw = (raw or ""):lower()
-    if raw == "linux" or raw == "gnu/linux" or raw == "android" or raw == "toybox" then
-        return raw == "android" or raw == "toybox" and "Android" or "Linux"
-    end
-    if raw == "osx" or raw == "darwin" then
-        return "OSX"
-    end
-    if raw == "windows" then
-        return "Windows"
-    end
-    return "Linux"
-end
-
--- Helper function to get the users operating system
-function getOS()
-    local raw
-    if jit and jit.os then
-        raw = jit.os
-    else
-        local fh = io.popen("uname -o 2>/dev/null", "r")
-        if fh then
-            raw = fh:read()
-            fh:close()
-        end
-    end
-    return normalizeOS(raw)
 end
