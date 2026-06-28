@@ -17,10 +17,10 @@ mp.register_event("file-loaded", function()
     filename = getFilename(myos)
     -- Strip filename of any escape characters
     filename = string.gsub(filename, "[^%w%.%-_]", "_")
-    -- Get files duration from pv 
+    -- Get files duration from pv
     duration = mp.get_property_number("duration")
     -- If the operating system is either Linux or Mac
-    if myos == 'GNU/Linux' or myos == 'OSX' or myos == 'Darwin' then
+    if myos == 'Linux' or myos == 'OSX' then
         -- Set folder to save position of files and the script folder location itself
         linux_mac_position_folder = os.getenv("HOME") .. '/.config/mpv/mpv-positions/'
         linux_script_folder       = os.getenv("HOME") .. '/.config/mpv/scripts/mpv-progress-sync/lib/'
@@ -35,8 +35,7 @@ mp.register_event("file-loaded", function()
         -- Set global 'folder' where the position file is saved to the linux and mac location
         folder                    = linux_mac_position_folder
     end
-    if myos == "Android" or myos == "Toybox" then
-
+    if myos == "Android" then
         -- Set folder to save position of files and the script folder location itself
         android_position_folder = "/storage/emulated/0/Android/media/is.xyz.mpv/mpv-positions/"
         android_script_folder =
@@ -78,23 +77,31 @@ mp.register_event("file-loaded", function()
         return
     -- Otherwise read the file and use lunajson's decode to un-marshall the Json
     else
-        local content, err = positionFile:read("*all")
-        local data = decode(content)
-        if err then
-            mp.osd_message(err .. " when opening the file " .. filepath .. ". Try deleting the file", "8")
-
-            print(err)
+        local content, readErr = positionFile:read("*all")
+        positionFile:close()
+        if readErr then
+            print("Error reading position file:", readErr)
+            return
+        end
+        local ok, data = pcall(decode, content)
+        if not ok then
+            local errMsg = tostring(data)
+            print("Failed to parse position file:", errMsg)
+            mp.osd_message("Failed to parse position file: " .. errMsg, "5")
+            return
+        end
+        if type(data) ~= "table" or data.loc == nil then
+            print("Position file has no valid 'loc' key:", filepath)
+            return
         end
         -- Use the 'loc' (location) saved in the Json file and ask mpv to seek to that location in the opened file
         mp.commandv("seek", data.loc, "absolute+exact")
-        -- Close the positionFile
-        positionFile:close()
     end
 end)
 
 -- Create a periodic timer in mpv for every one second
 timer = mp.add_periodic_timer(1, function()
-    -- If the file is playing 
+    -- If the file is playing
     if isPlaying then
         -- Set the position to the position that mpv has for the open file
         position = mp.get_property_number("time-pos")
@@ -102,10 +109,10 @@ timer = mp.add_periodic_timer(1, function()
 end)
 
 mp.register_event("shutdown", function()
-    -- Set isPlaying to false. This is because when existing mpv sets the 'time-pos' to nil so this stops the wrong position from being saved 
+    -- Set isPlaying to false. This is because when existing mpv sets the 'time-pos' to nil so this stops the wrong position from being saved
     isPlaying = false
 
-    -- If the position is not nill and it is greater than 2 seconds 
+    -- If the position is not nill and it is greater than 2 seconds
     if position ~= nil and position > 2 then
         -- Sanitise the filename to remove escape characters
         filename = string.gsub(filename, "[^%w%.%-_]", "_")
@@ -118,9 +125,9 @@ mp.register_event("shutdown", function()
         else
             os.execute("mkdir -p " .. folder)
         end
-        -- Create the filepath to save the position 
+        -- Create the filepath to save the position
         filepath = folder .. filename .. ".json"
-        -- Open tthe file 
+        -- Open tthe file
 
         print("Saving filepath: ",filepath)
         positionFile, err = io.open(filepath, "w")
@@ -134,12 +141,12 @@ mp.register_event("shutdown", function()
         if finalPosition <= 5 then
             position = 0
         end
-        -- Crete a table with the key 'loc'. The value is the opened files position 
+        -- Crete a table with the key 'loc'. The value is the opened files position
         local data = {
             loc = position
         }
 
-        -- Use lunajson's encode function to marshal Json data 
+        -- Use lunajson's encode function to marshal Json data
         local str = encode(data)
         -- Write the marshalled Json to the file
         positionFile:write(str)
@@ -148,7 +155,7 @@ mp.register_event("shutdown", function()
 end)
 
 
--- Helper function to load a file 
+-- Helper function to load a file
 function loadFile(path)
     return assert(loadfile(path))()
 end
@@ -159,10 +166,10 @@ function getFilename(myos)
 
     -- Open the md5 function from kikito, dependent on the operating system being used, This function is used to create a hash of the opened files filename
     md5 = nil
-    if myos == 'GNU/Linux' or myos == 'OSX' or myos == 'Darwin' then
+    if myos == 'Linux' or myos == 'OSX' then
         md5 = loadFile(os.getenv("HOME") .. '/.config/mpv/scripts/mpv-progress-sync/lib/md5.lua')
     end
-    if myos == "Android" or myos == "Toybox" then
+    if myos == "Android" then
         md5 = loadFile(
             '/storage/emulated/0/Android/media/is.xyz.mpv/mpv-progress-sync/lib/md5.lua')
     end
@@ -185,7 +192,7 @@ function getFilename(myos)
     local duration = mp.get_property_number("duration")
     -- Add the combination of the values together and convert to a string
     local file_descriptor = tostring(file_size + duration)
-    -- Use the md5 function to create a hash of the filename 
+    -- Use the md5 function to create a hash of the filename
     local fd = md5.sumhexa(file_descriptor)
     print("Hashed file size and duration file descriptor: ",fd)
     -- Return the hashed file size and duration descriptor
@@ -193,17 +200,32 @@ function getFilename(myos)
 end
 
 
+-- Normalize OS string to canonical values: "Linux", "OSX", "Windows", "Android"
+local function normalizeOS(raw)
+    raw = (raw or ""):lower()
+    if raw == "linux" or raw == "gnu/linux" or raw == "android" or raw == "toybox" then
+        return raw == "android" or raw == "toybox" and "Android" or "Linux"
+    end
+    if raw == "osx" or raw == "darwin" then
+        return "OSX"
+    end
+    if raw == "windows" then
+        return "Windows"
+    end
+    return "Linux"
+end
+
 -- Helper function to get the users operating system
 function getOS()
-    if jit then
-        return jit.os
+    local raw
+    if jit and jit.os then
+        raw = jit.os
+    else
+        local fh = io.popen("uname -o 2>/dev/null", "r")
+        if fh then
+            raw = fh:read()
+            fh:close()
+        end
     end
-
-    local fh, err = assert(io.popen("uname -o 2>/dev/null", "r"))
-    if fh then
-        osname = fh:read()
-    end
-
-    myos = osname or "Windows"
-    return myos
+    return normalizeOS(raw)
 end
