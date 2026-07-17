@@ -65,6 +65,10 @@ mp.register_event("file-loaded", function()
         end
         -- Use the 'loc' (location) saved in the Json file and ask mpv to seek to that location in the opened file
         mp.commandv("seek", data.loc, "absolute+exact")
+        -- Restore saved speed if present and numeric
+        if data.speed ~= nil and type(data.speed) == "number" then
+            mp.commandv("set", "speed", data.speed)
+        end
     end
 end)
 
@@ -106,7 +110,8 @@ mp.register_event("shutdown", function()
         end
         -- Create a table with the key 'loc'. The value is the opened files position
         local data = {
-            loc = position
+            loc = position,
+            speed = mp.get_property_number("speed")
         }
 
         -- Use lunajson's encode function to marshal Json data
